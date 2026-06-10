@@ -173,13 +173,19 @@ app.get('/api/plants', (req, res) => {
 app.post('/api/plants', (req, res) => {
   const plants = readJSON('plants.json');
   const now = new Date().toISOString();
+  const sanitizedCares = (req.body.customCares || [])
+    .map(c => ({ ...c, name: (c.name || '').trim() }))
+    .filter(c => c.name.length > 0);
+  if ((req.body.customCares || []).length > 0 && sanitizedCares.length < (req.body.customCares || []).length) {
+    return res.status(400).json({ error: '自定义养护项名称不能为空' });
+  }
   const newPlant = {
     id: generateId(),
     ...req.body,
     createdAt: now,
     lastWatering: req.body.lastWatering || now,
     lastFertilizing: req.body.lastFertilizing || now,
-    customCares: (req.body.customCares || []).map(c => ({
+    customCares: sanitizedCares.map(c => ({
       ...c,
       id: c.id || generateId(),
       lastDone: c.lastDone || now
@@ -201,7 +207,13 @@ app.put('/api/plants/:id', (req, res) => {
   }
   plants[index] = { ...plants[index], ...req.body, updatedAt: new Date().toISOString() };
   if (req.body.customCares) {
-    plants[index].customCares = req.body.customCares.map(c => ({
+    const sanitizedCares = req.body.customCares
+      .map(c => ({ ...c, name: (c.name || '').trim() }))
+      .filter(c => c.name.length > 0);
+    if (req.body.customCares.length > 0 && sanitizedCares.length < req.body.customCares.length) {
+      return res.status(400).json({ error: '自定义养护项名称不能为空' });
+    }
+    plants[index].customCares = sanitizedCares.map(c => ({
       ...c,
       id: c.id || generateId(),
       lastDone: c.lastDone || plants[index].createdAt || new Date().toISOString()

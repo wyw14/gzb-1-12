@@ -647,6 +647,14 @@ const PlantManagement = {
         if (valid) {
           try {
             const submitData = { ...formData };
+            const cleanedCares = (submitData.customCares || [])
+              .map(c => ({ ...c, name: (c.name || '').trim() }))
+              .filter(c => c.name.length > 0);
+            if (submitData.customCares && submitData.customCares.length > 0 && cleanedCares.length < submitData.customCares.length) {
+              ElMessage.warning('自定义养护项名称不能为空');
+              return;
+            }
+            submitData.customCares = cleanedCares;
             if (submitData.lastWatering) {
               submitData.lastWatering = new Date(submitData.lastWatering).toISOString();
             }
