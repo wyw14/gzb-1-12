@@ -37,6 +37,10 @@ const api = {
     const res = await fetch(`${API_BASE}/api/plants/${id}/fertilize`, { method: 'POST' });
     return res.json();
   },
+  async completeCustomCare(plantId, careId) {
+    const res = await fetch(`${API_BASE}/api/plants/${plantId}/custom-care/${careId}/complete`, { method: 'POST' });
+    return res.json();
+  },
   async getPhotos(plantId) {
     const res = await fetch(`${API_BASE}/api/plants/${plantId}/photos`);
     return res.json();
@@ -125,6 +129,15 @@ const humidityOptions = [
   { value: 'high', label: '高湿度 (60-80%)', icon: '💧' },
   { value: 'medium', label: '中等湿度 (40-60%)', icon: '💦' },
   { value: 'low', label: '低湿度 (<40%)', icon: '🏜️' }
+];
+
+const customCarePresets = [
+  { name: '修剪', cycle: 30, icon: '✂️' },
+  { name: '喷雾', cycle: 3, icon: '💨' },
+  { name: '擦叶', cycle: 14, icon: '🧹' },
+  { name: '转盆', cycle: 7, icon: '🔄' },
+  { name: '松土', cycle: 30, icon: '🪴' },
+  { name: '洗叶', cycle: 30, icon: '🚿' }
 ];
 
 const commonPlants = [
@@ -541,7 +554,8 @@ const PlantManagement = {
       fertilizingCycle: 30,
       lastWatering: '',
       lastFertilizing: '',
-      notes: ''
+      notes: '',
+      customCares: []
     });
 
     const rules = {
@@ -591,7 +605,8 @@ const PlantManagement = {
         fertilizingCycle: 30,
         lastWatering: new Date().toISOString().split('T')[0],
         lastFertilizing: new Date().toISOString().split('T')[0],
-        notes: ''
+        notes: '',
+        customCares: []
       });
       dialogVisible.value = true;
     };
@@ -609,7 +624,8 @@ const PlantManagement = {
         fertilizingCycle: plant.fertilizingCycle,
         lastWatering: plant.lastWatering ? plant.lastWatering.split('T')[0] : '',
         lastFertilizing: plant.lastFertilizing ? plant.lastFertilizing.split('T')[0] : '',
-        notes: plant.notes || ''
+        notes: plant.notes || '',
+        customCares: (plant.customCares || []).map(c => ({ ...c }))
       });
       dialogVisible.value = true;
     };
@@ -766,6 +782,43 @@ const PlantManagement = {
       uploadFile.value = uploadFileObj.raw;
     };
 
+    const addCustomCare = () => {
+      formData.customCares.push({
+        id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+        name: '',
+        cycle: 7,
+        lastDone: new Date().toISOString().split('T')[0]
+      });
+    };
+
+    const removeCustomCare = (index) => {
+      formData.customCares.splice(index, 1);
+    };
+
+    const addPresetCare = (preset) => {
+      const exists = formData.customCares.some(c => c.name === preset.name);
+      if (exists) {
+        ElMessage.warning(`"${preset.name}" 已添加`);
+        return;
+      }
+      formData.customCares.push({
+        id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+        name: preset.name,
+        cycle: preset.cycle,
+        lastDone: new Date().toISOString().split('T')[0]
+      });
+    };
+
+    const handleCustomCareComplete = async (plant, careId, careName) => {
+      try {
+        await api.completeCustomCare(plant.id, careId);
+        ElMessage.success(`已记录 ${plant.name} 的${careName}`);
+        loadPlants();
+      } catch (e) {
+        ElMessage.error('操作失败');
+      }
+    };
+
     onMounted(() => {
       loadPlants();
     });
@@ -790,6 +843,7 @@ const PlantManagement = {
       lightOptions,
       humidityOptions,
       commonPlants,
+      customCarePresets,
       openAddDialog,
       openEditDialog,
       selectCommonPlant,
@@ -797,6 +851,10 @@ const PlantManagement = {
       handleDelete,
       handleWater,
       handleFertilize,
+      addCustomCare,
+      removeCustomCare,
+      addPresetCare,
+      handleCustomCareComplete,
       getPlantStatus,
       getStatusText,
       getDifficultyLabel,
@@ -872,10 +930,26 @@ const PlantManagement = {
                       {{ formatDate(plant.nextFertilizing) }}
                     </el-tag>
                   </div>
+                  <div v-for="nc in (plant.nextCustomCares || [])" :key="nc.id" class="plant-card-care-item">
+                    <span>🔧 {{ nc.name }}</span>
+                    <el-tag size="small" :type="getDaysDiff(nc.nextDate) <= 0 ? 'danger' : getDaysDiff(nc.nextDate) <= 3 ? 'warning' : 'success'">
+                      {{ formatDate(nc.nextDate) }}
+                    </el-tag>
+                  </div>
                 </div>
                 <div class="plant-card-actions">
                   <el-button size="small" type="primary" @click="handleWater(plant)">浇水</el-button>
                   <el-button size="small" type="warning" @click="handleFertilize(plant)">施肥</el-button>
+                  <el-dropdown v-if="(plant.customCares || []).length > 0" style="margin-left: 8px;">
+                    <el-button size="small" type="success">🔧 养护</el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item v-for="care in plant.customCares" :key="care.id" @click="handleCustomCareComplete(plant, care.id, care.name)">
+                          ✅ {{ care.name }}
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                   <el-dropdown>
                     <el-button size="small" :icon="MoreFilled">更多</el-button>
                     <template #dropdown>
@@ -970,6 +1044,44 @@ const PlantManagement = {
           <el-form-item label="备注">
             <el-input v-model="formData.notes" type="textarea" :rows="3" placeholder="记录一些养护心得..." />
           </el-form-item>
+          <el-divider content-position="left">🔧 自定义养护项</el-divider>
+          <div class="custom-care-section">
+            <div class="custom-care-presets">
+              <span style="color: #666; font-size: 13px; margin-right: 8px;">快捷添加：</span>
+              <el-tag
+                v-for="preset in customCarePresets"
+                :key="preset.name"
+                class="custom-care-preset-tag"
+                @click="addPresetCare(preset)"
+              >
+                {{ preset.icon }} {{ preset.name }}
+              </el-tag>
+            </div>
+            <div v-for="(care, index) in formData.customCares" :key="care.id" class="custom-care-item">
+              <el-row :gutter="12" align="middle">
+                <el-col :span="8">
+                  <el-input v-model="care.name" placeholder="养护名称" size="small" />
+                </el-col>
+                <el-col :span="6">
+                  <el-input-number v-model="care.cycle" :min="1" :max="365" size="small" controls-position="right" style="width: 100%;" />
+                </el-col>
+                <el-col :span="6">
+                  <el-date-picker v-model="care.lastDone" type="date" placeholder="上次执行" size="small" style="width: 100%;" />
+                </el-col>
+                <el-col :span="4">
+                  <el-button type="danger" :icon="Delete" size="small" circle @click="removeCustomCare(index)" />
+                </el-col>
+              </el-row>
+              <div class="custom-care-item-label">
+                <span>名称</span>
+                <span>周期(天)</span>
+                <span>上次执行</span>
+              </div>
+            </div>
+            <el-button type="primary" plain size="small" @click="addCustomCare" style="margin-top: 8px;">
+              <el-icon><Plus /></el-icon> 添加自定义养护
+            </el-button>
+          </div>
         </el-form>
         <template #footer>
           <el-button @click="dialogVisible = false">取消</el-button>
@@ -1064,6 +1176,19 @@ const NotificationPage = {
       }
     };
 
+    const handleCustomCare = async (notification) => {
+      try {
+        loading.value = true;
+        await api.completeCustomCare(notification.plantId, notification.careId);
+        ElMessage.success(`${notification.careName}完成`);
+        emit('refresh');
+      } catch (e) {
+        ElMessage.error('操作失败');
+      } finally {
+        loading.value = false;
+      }
+    };
+
     const getNotificationClass = (n) => {
       if (n.isOverdue) return 'overdue';
       const days = getDaysDiff(n.date);
@@ -1073,7 +1198,8 @@ const NotificationPage = {
 
     const getNotificationIcon = (n) => {
       if (n.type === 'watering') return '💧';
-      return '🌾';
+      if (n.type === 'fertilizing') return '🌾';
+      return '🔧';
     };
 
     const groupedNotifications = computed(() => {
@@ -1092,6 +1218,7 @@ const NotificationPage = {
       groupedNotifications,
       handleWater,
       handleFertilize,
+      handleCustomCare,
       getNotificationClass,
       getNotificationIcon,
       formatDate
@@ -1120,15 +1247,18 @@ const NotificationPage = {
             <div class="notification-icon">{{ getNotificationIcon(notification) }}</div>
             <div class="notification-content">
               <div class="notification-title">{{ notification.message }}</div>
-              <div class="notification-desc">{{ notification.plantName }} - {{ notification.type === 'watering' ? '浇水' : '施肥' }}</div>
+              <div class="notification-desc">{{ notification.plantName }} - {{ notification.type === 'watering' ? '浇水' : notification.type === 'fertilizing' ? '施肥' : notification.careName }}</div>
               <div class="notification-time">{{ formatDate(notification.date) }}</div>
             </div>
             <div>
               <el-button v-if="notification.type === 'watering'" type="primary" @click="handleWater(notification)">
                 立即浇水
               </el-button>
-              <el-button v-else type="warning" @click="handleFertilize(notification)">
+              <el-button v-else-if="notification.type === 'fertilizing'" type="warning" @click="handleFertilize(notification)">
                 立即施肥
+              </el-button>
+              <el-button v-else type="success" @click="handleCustomCare(notification)">
+                完成{{ notification.careName }}
               </el-button>
             </div>
           </div>

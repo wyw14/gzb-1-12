@@ -743,3 +743,49 @@ body {
     font-size: 22px;
   }
 }
+
+.custom-care-section {
+  padding: 0 0 12px;
+}
+
+.custom-care-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.custom-care-preset-tag {
+  cursor: pointer;
+  padding: 6px 14px;
+  transition: all 0.2s;
+  border: 1px dashed #a5d6a7;
+}
+
+.custom-care-preset-tag:hover {
+  background: #e8f5e9;
+  border-color: #4caf50;
+  color: #2e7d32;
+}
+
+.custom-care-item {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #f9fbe7;
+  border-radius: 8px;
+  border: 1px solid #e6ee9c;
+}
+
+.custom-care-item-label {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: #999;
+}
+
+.custom-care-item-label span:nth-child(1) { margin-left: 0; }
+.custom-care-item-label span:nth-child(2) { margin-left: calc(33.33% - 40px); }
+.custom-care-item-label span:nth-child(3) { margin-left: calc(25% - 20px); }

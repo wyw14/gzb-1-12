@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3012;
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -51,10 +51,24 @@ const calculateNextCare = (plant) => {
   const nextWatering = new Date(lastWatering.getTime() + plant.wateringCycle * 24 * 60 * 60 * 1000);
   const nextFertilizing = new Date(lastFertilizing.getTime() + plant.fertilizingCycle * 24 * 60 * 60 * 1000);
   
-  return {
+  const result = {
     nextWatering: nextWatering.toISOString(),
     nextFertilizing: nextFertilizing.toISOString()
   };
+
+  if (plant.customCares && Array.isArray(plant.customCares)) {
+    result.nextCustomCares = plant.customCares.map(care => {
+      const lastDone = care.lastDone ? new Date(care.lastDone) : now;
+      const nextDate = new Date(lastDone.getTime() + care.cycle * 24 * 60 * 60 * 1000);
+      return {
+        id: care.id,
+        name: care.name,
+        nextDate: nextDate.toISOString()
+      };
+    });
+  }
+
+  return result;
 };
 
 const pestsKnowledge = [
@@ -165,6 +179,11 @@ app.post('/api/plants', (req, res) => {
     createdAt: now,
     lastWatering: req.body.lastWatering || now,
     lastFertilizing: req.body.lastFertilizing || now,
+    customCares: (req.body.customCares || []).map(c => ({
+      ...c,
+      id: c.id || generateId(),
+      lastDone: c.lastDone || now
+    })),
     status: 'healthy'
   };
   plants.push(newPlant);
@@ -181,6 +200,13 @@ app.put('/api/plants/:id', (req, res) => {
     return res.status(404).json({ error: '植物不存在' });
   }
   plants[index] = { ...plants[index], ...req.body, updatedAt: new Date().toISOString() };
+  if (req.body.customCares) {
+    plants[index].customCares = req.body.customCares.map(c => ({
+      ...c,
+      id: c.id || generateId(),
+      lastDone: c.lastDone || plants[index].createdAt || new Date().toISOString()
+    }));
+  }
   writeJSON('plants.json', plants);
   
   const nextCare = calculateNextCare(plants[index]);
@@ -244,6 +270,38 @@ app.post('/api/plants/:id/fertilize', (req, res) => {
   });
   writeJSON('care-records.json', careRecords);
   
+  const nextCare = calculateNextCare(plants[index]);
+  res.json({ ...plants[index], ...nextCare });
+});
+
+app.post('/api/plants/:id/custom-care/:careId/complete', (req, res) => {
+  const plants = readJSON('plants.json');
+  const index = plants.findIndex(p => p.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ error: '植物不存在' });
+  }
+
+  const careItem = (plants[index].customCares || []).find(c => c.id === req.params.careId);
+  if (!careItem) {
+    return res.status(404).json({ error: '自定义养护项不存在' });
+  }
+
+  const now = new Date().toISOString();
+  careItem.lastDone = now;
+  writeJSON('plants.json', plants);
+
+  const careRecords = readJSON('care-records.json');
+  careRecords.push({
+    id: generateId(),
+    plantId: req.params.id,
+    type: 'custom',
+    careName: careItem.name,
+    careId: careItem.id,
+    date: now,
+    completed: true
+  });
+  writeJSON('care-records.json', careRecords);
+
   const nextCare = calculateNextCare(plants[index]);
   res.json({ ...plants[index], ...nextCare });
 });
@@ -351,8 +409,14 @@ app.get('/api/statistics', (req, res) => {
   
   const careTypeStats = {
     watering: careRecords.filter(r => r.type === 'watering').length,
-    fertilizing: careRecords.filter(r => r.type === 'fertilizing').length
+    fertilizing: careRecords.filter(r => r.type === 'fertilizing').length,
+    custom: careRecords.filter(r => r.type === 'custom').length
   };
+
+  const customCareNames = {};
+  careRecords.filter(r => r.type === 'custom' && r.careName).forEach(r => {
+    customCareNames[r.careName] = (customCareNames[r.careName] || 0) + 1;
+  });
   
   const completedRecords = careRecords.filter(r => r.completed).length;
   const totalExpected = plants.length * 4;
@@ -365,6 +429,7 @@ app.get('/api/statistics', (req, res) => {
     monthlyStats[monthKey] = {
       watering: 0,
       fertilizing: 0,
+      custom: 0,
       newPlants: 0
     };
   }
@@ -375,6 +440,7 @@ app.get('/api/statistics', (req, res) => {
     if (monthlyStats[monthKey]) {
       if (record.type === 'watering') monthlyStats[monthKey].watering++;
       if (record.type === 'fertilizing') monthlyStats[monthKey].fertilizing++;
+      if (record.type === 'custom') monthlyStats[monthKey].custom++;
     }
   });
   
@@ -397,6 +463,7 @@ app.get('/api/statistics', (req, res) => {
     totalCareRecords: careRecords.length,
     difficultyStats,
     careTypeStats,
+    customCareNames,
     monthlyStats
   });
 });
@@ -553,6 +620,26 @@ app.get('/api/notifications', (req, res) => {
         date: nextCare.nextFertilizing,
         isOverdue,
         message: `${plant.name} ${isOverdue ? '已过期' : '需要'}施肥`
+      });
+    }
+
+    if (nextCare.nextCustomCares && Array.isArray(nextCare.nextCustomCares)) {
+      nextCare.nextCustomCares.forEach(nc => {
+        const nextDate = new Date(nc.nextDate);
+        if (nextDate <= threeDaysLater) {
+          const isOverdue = nextDate < now;
+          notifications.push({
+            id: `custom-${nc.id}`,
+            plantId: plant.id,
+            plantName: plant.name,
+            type: 'custom',
+            careName: nc.name,
+            careId: nc.id,
+            date: nc.nextDate,
+            isOverdue,
+            message: `${plant.name} ${isOverdue ? '已过期' : '需要'}${nc.name}`
+          });
+        }
       });
     }
   });
